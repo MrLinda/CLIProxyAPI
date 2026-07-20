@@ -4,13 +4,13 @@ on:
   push:
     branches:
       - custom
+    tags:
+      - 'v*-custom.*'
     paths-ignore:
       - '**/*.md'
   pull_request:
     branches:
       - custom
-    paths-ignore:
-      - '**/*.md'
 
 concurrency:
   group: custom-ci-image-${{ github.workflow }}-${{ github.ref }}
@@ -44,7 +44,11 @@ jobs:
 
   publish:
     needs: validate
-    if: github.event_name == 'push' && github.ref == 'refs/heads/custom'
+    if: >-
+      github.event_name == 'push' &&
+      github.ref_type == 'tag' &&
+      startsWith(github.ref_name, 'v') &&
+      contains(github.ref_name, '-custom.')
     permissions:
       contents: read
       packages: write
@@ -71,31 +75,48 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
       - name: Generate metadata
+        id: metadata
+        shell: bash
         run: |
-          echo "VERSION=custom" >> "$GITHUB_ENV"
-          echo "COMMIT=${{ github.sha }}" >> "$GITHUB_ENV"
-          echo "BUILD_DATE=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_ENV"
+          set -euo pipefail
+
+          version="${GITHUB_REF_NAME}"
+          commit="${GITHUB_SHA}"
+          build_date="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+
+          {
+            echo "version=${version}"
+            echo "commit=${commit}"
+            echo "build_date=${build_date}"
+          } >> "$GITHUB_OUTPUT"
       - name: Build and push
         uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
         with:
           context: .
+          file: ./Dockerfile
           platforms: linux/amd64
           push: true
           build-args: |
-            VERSION=${{ env.VERSION }}
-            COMMIT=${{ env.COMMIT }}
-            BUILD_DATE=${{ env.BUILD_DATE }}
+            VERSION=${{ steps.metadata.outputs.version }}
+            COMMIT=${{ steps.metadata.outputs.commit }}
+            BUILD_DATE=${{ steps.metadata.outputs.build_date }}
           tags: |
             ghcr.io/mrlinda/cli-proxy-api:custom
+            ghcr.io/mrlinda/cli-proxy-api:${{ steps.metadata.outputs.version }}
             ghcr.io/mrlinda/cli-proxy-api:sha-${{ github.sha }}
           labels: |
             org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
             org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.version=${{ steps.metadata.outputs.version }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
       - name: Summary
+        shell: bash
         run: |
-          echo "### Published container images" >> "$GITHUB_STEP_SUMMARY"
-          echo "" >> "$GITHUB_STEP_SUMMARY"
-          echo "- \`ghcr.io/mrlinda/cli-proxy-api:custom\`" >> "$GITHUB_STEP_SUMMARY"
-          echo "- \`ghcr.io/mrlinda/cli-proxy-api:sha-${{ github.sha }}\`" >> "$GITHUB_STEP_SUMMARY"
+          {
+            echo "### Published container images"
+            echo
+            echo "- \`ghcr.io/mrlinda/cli-proxy-api:custom\`"
+            echo "- \`ghcr.io/mrlinda/cli-proxy-api:${{ steps.metadata.outputs.version }}\`"
+            echo "- \`ghcr.io/mrlinda/cli-proxy-api:sha-${{ github.sha }}\`"
+          } >> "$GITHUB_STEP_SUMMARY"
