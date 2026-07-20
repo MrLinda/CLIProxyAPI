@@ -1,0 +1,101 @@
+name: custom-ci-image
+
+on:
+  push:
+    branches:
+      - custom
+    paths-ignore:
+      - '**/*.md'
+  pull_request:
+    branches:
+      - custom
+    paths-ignore:
+      - '**/*.md'
+
+concurrency:
+  group: custom-ci-image-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+      - name: Set up Go
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Refresh models catalog
+        run: bash .github/scripts/refresh-model-catalogs.sh
+      - name: Build
+        run: |
+          go build -o test-output ./cmd/server
+          rm -f test-output
+      - name: Test
+        run: go test -count=1 ./...
+
+  publish:
+    needs: validate
+    if: github.event_name == 'push' && github.ref == 'refs/heads/custom'
+    permissions:
+      contents: read
+      packages: write
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+      - name: Set up Go
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Refresh models catalog
+        run: bash .github/scripts/refresh-model-catalogs.sh
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@af1e73f918a031802d376d3c8bbc3fe56130a9b0 # v4.4.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Generate metadata
+        run: |
+          echo "VERSION=custom" >> "$GITHUB_ENV"
+          echo "COMMIT=${{ github.sha }}" >> "$GITHUB_ENV"
+          echo "BUILD_DATE=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_ENV"
+      - name: Build and push
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
+        with:
+          context: .
+          platforms: linux/amd64
+          push: true
+          build-args: |
+            VERSION=${{ env.VERSION }}
+            COMMIT=${{ env.COMMIT }}
+            BUILD_DATE=${{ env.BUILD_DATE }}
+          tags: |
+            ghcr.io/mrlinda/cli-proxy-api:custom
+            ghcr.io/mrlinda/cli-proxy-api:sha-${{ github.sha }}
+          labels: |
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      - name: Summary
+        run: |
+          echo "### Published container images" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "- \`ghcr.io/mrlinda/cli-proxy-api:custom\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "- \`ghcr.io/mrlinda/cli-proxy-api:sha-${{ github.sha }}\`" >> "$GITHUB_STEP_SUMMARY"
