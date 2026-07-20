@@ -1,4 +1,7 @@
-# AGENTS.md
+# Repository instructions for agents
+
+These instructions apply to the entire repository unless a more specific
+`AGENTS.md` exists in a subdirectory.
 
 Go 1.26+ proxy server providing OpenAI/Gemini/Claude/Codex compatible APIs with OAuth and round-robin load balancing.
 
@@ -7,7 +10,6 @@ Go 1.26+ proxy server providing OpenAI/Gemini/Claude/Codex compatible APIs with 
 
 ## Commands
 ```bash
-gofmt -w . # Format (required after Go changes)
 go build -o cli-proxy-api ./cmd/server # Build
 go run ./cmd/server # Run dev server
 go test ./... # Run all tests
@@ -102,8 +104,8 @@ Use a timestamp suffix when the name already exists.
 The full test suite must not regress relative to the maintained branch
 baseline.
 
-On Windows, `internal/api` may have known environment-dependent failures
-caused by:
+On Windows, `internal/api` currently has known environment-dependent baseline
+failures caused by:
 
 - SQLite temporary database files remaining locked during cleanup;
 - integration tests requiring unavailable Redis-backed services.
@@ -123,17 +125,153 @@ work.
 
 ## Allowed untracked content
 
-After any git operation, the only allowed untracked entries are:
+After any git operation, the only allowed visible untracked entry in
+`git status --short` is:
 
 ```
-?? docker-build/
 ?? pr-body.md
 ```
 
-- `docker-build/` contains local Docker build artifacts (`.tar` files).
-  Never delete, move, stage, commit, or `git clean` them.
-  Never commit the `.tar` files in this directory to any branch.
 - `pr-body.md` is a local PR description draft kept for convenience.
+- `docker-build/` is intentionally git-ignored and will not appear in
+  `git status --short`. It contains local Docker build artifacts (`.tar`
+  files). Never delete, move, stage, commit, or `git clean` them.
+  Never commit the `.tar` files in this directory to any branch.
+- Any other untracked, modified, staged, or conflicted entry must be reported
+  and investigated before proceeding with destructive operations.
 
-Any other untracked, modified, staged, or conflicted entry must be reported
-and investigated before proceeding with destructive operations.
+## Formatting rules
+
+Do not use `gofmt -w .` — it may modify unrelated files.
+
+Only when Go files have been manually modified (e.g. after merge conflict
+resolution), format the specific files:
+
+```bash
+git diff --name-only --diff-filter=ACM -- '*.go'
+gofmt -w <file1> <file2> ...
+```
+
+After formatting, rebuild and retest:
+
+```bash
+go build -o test-output ./cmd/server
+rm -f test-output
+go test ./...
+```
+
+If no Go files were manually modified, do not run gofmt.
+
+## Conflict handling
+
+When a merge or cherry-pick produces conflicts:
+
+1. Stop immediately.
+2. Output:
+   ```bash
+   git status --short
+   git diff --name-only --diff-filter=U
+   ```
+3. List the conflicted files and the modules they belong to.
+4. Do not:
+   - choose `ours` or `theirs`;
+   - modify business logic;
+   - skip the conflicted commit;
+   - automatically `git merge --abort`.
+5. If abort is needed, explain the planned command first and wait for
+   confirmation.
+
+## Build and test rules
+
+Standard validation sequence:
+
+```bash
+go build -o test-output ./cmd/server
+rm -f test-output
+go test ./...
+```
+
+Rules:
+- Stop on build failure.
+- Stop on any new test failure relative to the baseline.
+- Packages directly modified by the current changes must pass targeted tests.
+- Do not push `custom` when build fails or new regressions appear.
+- Known platform-dependent baseline failures must be verified against the
+  unmodified baseline before being accepted (see Test baseline policy above).
+
+## Document scope
+
+- `AGENTS.md` and `SYNC.md` belong to the `custom` branch.
+- They must never be committed to the `main` (pure mirror) branch.
+- Before creating or updating these documents, check whether they already
+  exist. Do not blindly overwrite existing content.
+- Do not create automated GitHub Actions sync workflows unless explicitly
+  requested.
+
+## Reorganization commit records
+
+The following commits and references were established during the initial
+repository reorganization:
+
+| Item | SHA | Description |
+| --- | --- | --- |
+| Original think-tag-parsing commit | `1c54269b7302797778ccbe80824d48e03e450b0a` | On `feat/think-tag-parsing` branch |
+| Cherry-picked in custom | `2a00d9fbd1aa5a8962076e75526d7bc38658b672` | Same patch, new SHA after cherry-pick |
+| Stable patch-id | `7959379bf68089843849ce6359ebe18bc2ad5f61` | Both commits produce this patch-id |
+| Upstream merge commit | `928b835a31022c2bac933feef913fb863084fa7c` | `git merge upstream/main --no-edit` |
+| AGENTS.md initial commit | `10842095` | First maintenance policy commit |
+| SYNC.md initial commit | `a032ab63` | First sync workflow commit |
+| Backup branch | `backup/pre-reorg-20260720` → `fc777089cabf44453dcc37ef7f73803562b1a1b6` | `main` before reset |
+| Backup tag | `backup/feat-think-tag-parsing-pre-reorg` → `1c54269b7302797778ccbe80824d48e03e450b0a` | `feat/think-tag-parsing` before operations |
+| pr-body.md external backup | `..\CLIProxyAPI-pre-reorg-backup-20260720-214219\pr-body.md` | Backup copy outside repository |
+
+Verification rules for cherry-picked patches:
+- `git show 1c54269b | git patch-id --stable` should match
+  `git show 2a00d9fb | git patch-id --stable`.
+- If patch-id differs, use `git range-diff 1c54269b^! 2a00d9fb^!` to compare
+  the actual delta. Do not use a plain tree diff.
+
+These SHAs are historical records. Future `custom` HEAD changes are normal.
+Do not use these SHAs to block normal updates.
+
+### Reorganization test matrix
+
+Three-state comparison performed at reorganization time:
+
+| State | internal/api | internal/runtime/executor |
+| --- | --- | --- |
+| kogeki-main (`fc777089`) | 36 failures (baseline) | 1 flaky failure |
+| merged-before-patch (`928b835a`) | same 36 failures | passed |
+| custom-after-patch (`2a00d9fb`) | same 36 failures | passed |
+
+The merge and cherry-pick introduced **no new test failures** relative to the
+kogeki/main baseline. Build succeeded. All 20+ affected Go packages passed
+targeted tests.
+
+Diagnosis logs preserved at:
+```
+E:\Code\personal\CLIProxyAPI-test-matrix-20260720-222036\
+```
+
+This path is specific to the current Windows workspace. Future agents should
+not treat its absence as an anomaly. New baseline diagnostics should generate
+and report a new log path.
+
+## Mandatory stop conditions
+
+Operation must stop immediately when any of the following occurs:
+
+- Merge or cherry-pick conflict.
+- Build failure.
+- New test failure relative to the unmodified baseline.
+- Targeted test failure in packages directly modified by the current work.
+- `git push origin main --force-with-lease` is rejected.
+- Remote ownership or branch ancestry does not match documented structure.
+- Operation would overwrite an existing branch, tag, or file without explicit
+  authorization.
+- Working tree contains unexpected modified, staged, or untracked content
+  (beyond `pr-body.md` and the git-ignored `docker-build/`).
+- Determining which commits belong to personal work requires guessing.
+- Local or remote `custom` would be overwritten.
+- An existing `AGENTS.md` or `SYNC.md` would be blindly overwritten.
+- `git clean` or force-push without authorization is required to proceed.
