@@ -3,7 +3,8 @@ name: docker-image
 on:
   push:
     tags:
-      - v*
+      - 'v*'
+      - '!v*-custom.*'
 
 env:
   APP_NAME: CLIProxyAPI
