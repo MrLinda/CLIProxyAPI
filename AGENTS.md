@@ -257,6 +257,36 @@ This path is specific to the current Windows workspace. Future agents should
 not treat its absence as an anomaly. New baseline diagnostics should generate
 and report a new log path.
 
+### Initial custom image release
+
+The following records document the first custom image release.
+
+Version tag: `v7.2.91-custom.1`
+
+Released commit: `f5f72dc7458a62b93e8d6aea28d2cbd3ed423d8a`
+
+Top-level image digest:
+`sha256:dff33cb05f604faa701f575102eb8e648b2c991b7e98d17f0f101d937c17150f`
+
+Three GHCR image tags (verified identical digest):
+- `ghcr.io/mrlinda/cli-proxy-api:custom`
+- `ghcr.io/mrlinda/cli-proxy-api:v7.2.91-custom.1`
+- `ghcr.io/mrlinda/cli-proxy-api:sha-f5f72dc7458a62b93e8d6aea28d2cbd3ed423d8a`
+
+The validate and publish jobs both succeeded. The GitHub Release workflow also
+ran successfully for this tag.
+
+The initial custom tag push also triggered the legacy Docker Hub workflow,
+which failed due to missing Docker Hub credentials in this fork. A subsequent
+commit, `e51093f73e668afc02963e61b43d62109ef57408`, updated the legacy workflow
+to exclude `v*-custom.*` tags. That commit was validated but was not released
+as a new container version. Therefore, the most recently released image may
+legitimately reference an earlier commit (`f5f72dc7`) than the current
+`custom` branch HEAD (`e51093f7`).
+
+These SHAs and digests are historical records of the initial custom release.
+Future releases will use different version tags, commits, and digests.
+
 ## Mandatory stop conditions
 
 Operation must stop immediately when any of the following occurs:
@@ -275,3 +305,98 @@ Operation must stop immediately when any of the following occurs:
 - Local or remote `custom` would be overwritten.
 - An existing `AGENTS.md` or `SYNC.md` would be blindly overwritten.
 - `git clean` or force-push without authorization is required to proceed.
+
+## Custom release policy
+
+### Validation-only pushes
+
+Ordinary pushes to `custom` run validation only (build and test). They do not
+publish or replace container images. The `custom` branch HEAD may be newer
+than the commit represented by the `ghcr.io/mrlinda/cli-proxy-api:custom`
+image tag. This is expected when validated commits have not yet received a
+version release tag.
+
+### Version tag triggers
+
+Only annotated Git tags matching `v*-custom.*` trigger image publication.
+Examples: `v7.2.91-custom.1`, `v7.2.91-custom.2`.
+
+Tag format meaning:
+- `vX.Y.Z` is the official upstream version baseline.
+- `custom.N` is the Nth custom release on top of that baseline.
+
+After the official baseline updates, the custom sequence may restart at 1
+(e.g. `v7.2.92-custom.1`).
+
+### Three image tags
+
+A successful version tag workflow builds the Docker image once and publishes
+three tags pointing to the same digest:
+
+| Tag | Semantics | Mutable? |
+| --- | --- | --- |
+| `ghcr.io/mrlinda/cli-proxy-api:custom` | Latest released custom version | Yes (rolling) |
+| `ghcr.io/mrlinda/cli-proxy-api:<version>` | Fixed version identifier | No |
+| `ghcr.io/mrlinda/cli-proxy-api:sha-<commit>` | Immutable commit pointer | No |
+
+After publication, verify all three tags share the same top-level digest.
+
+### Pre-release checklist
+
+1. Confirm current branch is `custom` and matches `origin/custom`.
+2. Confirm `custom` branch validate workflow succeeded and publish was skipped.
+3. Confirm the target version tag does not exist locally or on `origin`.
+4. Confirm the tag points to the intended commit.
+5. Create an annotated tag:
+   ```bash
+   git tag -a <version-tag> <commit-sha> -m "Release <version-tag>"
+   git push origin refs/tags/<version-tag>
+   ```
+
+### Post-release verification
+
+- Validate job succeeded.
+- Publish job succeeded.
+- Release workflow completed successfully (GitHub Release + multi-platform
+  packages).
+- Legacy Docker Hub workflow did not respond to the custom tag.
+- All three GHCR tags reference the same top-level digest.
+- `VERSION` build arg equals the Git tag.
+- `COMMIT` build arg equals the tag's peeled commit.
+
+### Prohibited actions
+
+- Moving, deleting, or overwriting a published version tag.
+- Reusing a version number with a different commit.
+- Force-pushing any tag.
+- Deleting a failed-version tag and re-releasing under the same name.
+- Auto-incrementing the next version number.
+- Publishing a `latest` tag.
+- Confusing an ordinary `custom` branch push with a release.
+- Running `publish` when `validate` fails.
+- Logging into GHCR or publishing images from a pull request.
+- Using PAT, password, or private key instead of `GITHUB_TOKEN`.
+- Auto-modifying GHCR package visibility.
+- Auto-deploying to production servers.
+
+### Legacy Docker Hub workflow
+
+The existing `.github/workflows/docker-image.yml` excludes custom version tags:
+
+```yaml
+tags:
+  - 'v*'
+  - '!v*-custom.*'
+```
+
+- Standard upstream-format tags still trigger the legacy Docker Hub workflow.
+- Custom `v*-custom.*` tags are excluded and do not attempt to publish to
+  `eceasy/cli-proxy-api`.
+- This workflow remains present and active for non-custom tags.
+
+### Existing release workflow
+
+The existing `.github/workflows/release.yaml` responds to all tags (including
+`v*-custom.*`) and generates GitHub Releases with multi-platform packages.
+This is intentional: the same tag may trigger both `custom-ci-image` (GHCR)
+and `release` (GitHub Release).
