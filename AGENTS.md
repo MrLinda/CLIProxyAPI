@@ -284,11 +284,12 @@ ran successfully for this tag.
 
 The initial custom tag push also triggered the legacy Docker Hub workflow,
 which failed due to missing Docker Hub credentials in this fork. A subsequent
-commit, `e51093f73e668afc02963e61b43d62109ef57408`, updated the legacy workflow
-to exclude `v*-custom.*` tags. That commit was validated but was not released
-as a new container version. Therefore, the most recently released image may
+commit, `e51093f73e668afc02963e61b43d62109ef57408`, excluded `v*-custom.*` tags
+from that workflow. The workflow was later fully removed from the repository;
+custom images are now published exclusively by `custom-ci-image`.
+Therefore, the most recently released image may
 legitimately reference an earlier commit (`f5f72dc7`) than the current
-`custom` branch HEAD (`e51093f7`).
+`custom` branch HEAD.
 
 These SHAs and digests are historical records of the initial custom release.
 Future releases will use different version tags, commits, and digests.
@@ -308,6 +309,28 @@ The following changes were applied after the initial release:
   `backup/feat-think-tag-parsing-pre-reorg` (→ `1c54269b`).
 - Deleting the branch does not remove the functionality; `custom` already
   contains the equivalent patch.
+
+These are historical records. Future cleanup operations may differ.
+
+### Inherited workflow cleanup
+
+The following inherited GitHub Actions workflows were removed from the
+repository after the default branch was changed to `custom`:
+
+- `.github/workflows/agents-md-guard.yml` — closed PRs modifying `AGENTS.md`;
+  unnecessary in a personal fork with no open contributions.
+- `.github/workflows/auto-retarget-main-pr-to-dev.yml` — retargeted `main` PRs
+  to `dev`; `dev` no longer exists as a remote branch.
+- `.github/workflows/docker-image.yml` — published to Docker Hub; the fork
+  now publishes only to GHCR via `custom-ci-image`.
+- `.github/workflows/pr-test-build.yml` — built (but did not test) any PR;
+  `custom-ci-image` covers PRs to `custom` with build and full test.
+- `.github/workflows/pr-path-guard.yml` — blocked `internal/translator/`
+  changes in PRs; translator modifications now follow normal review and test
+  processes.
+
+Removing these workflows did not affect GitHub Release publishing, GHCR
+image publishing, or Dependabot Dependency Graph functionality.
 
 These are historical records. Future cleanup operations may differ.
 
@@ -383,7 +406,8 @@ After publication, verify all three tags share the same top-level digest.
 - Publish job succeeded.
 - Release workflow completed successfully (GitHub Release + multi-platform
   packages).
-- Legacy Docker Hub workflow did not respond to the custom tag.
+- Legacy Docker Hub workflow was excluded from custom tags and
+  later removed from the repository.
 - All three GHCR tags reference the same top-level digest.
 - `VERSION` build arg equals the Git tag.
 - `COMMIT` build arg equals the tag's peeled commit.
@@ -405,18 +429,11 @@ After publication, verify all three tags share the same top-level digest.
 
 ### Legacy Docker Hub workflow
 
-The existing `.github/workflows/docker-image.yml` excludes custom version tags:
-
-```yaml
-tags:
-  - 'v*'
-  - '!v*-custom.*'
-```
-
-- Standard upstream-format tags still trigger the legacy Docker Hub workflow.
-- Custom `v*-custom.*` tags are excluded and do not attempt to publish to
-  `eceasy/cli-proxy-api`.
-- This workflow remains present and active for non-custom tags.
+The inherited Docker Hub workflow was removed after the repository adopted
+the GHCR-only custom release process. Custom images are published exclusively
+by `custom-ci-image`. The personal fork no longer publishes to
+`eceasy/cli-proxy-api` and no longer requires `DOCKERHUB_USERNAME` or
+`DOCKERHUB_TOKEN`.
 
 ### Existing release workflow
 
