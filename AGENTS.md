@@ -442,7 +442,33 @@ The existing `.github/workflows/release.yaml` responds to all tags (including
 This is intentional: the same tag may trigger both `custom-ci-image` (GHCR)
 and `release` (GitHub Release).
 
-## Maintenance shorthand commands
+### Management Center
+
+The management panel assets are published from the companion repository
+`MrLinda/Cli-Proxy-API-Management-Center`, which follows the same remote and
+branch structure as this repository:
+
+| Remote | URL |
+| --- | --- |
+| `origin` | `MrLinda/Cli-Proxy-API-Management-Center` |
+| `upstream` | `router-for-me/Cli-Proxy-API-Management-Center` |
+| `kogeki` | `kogekiplay/Cli-Proxy-API-Management-Center` |
+
+- `main` mirrors `upstream/main`.
+- `custom` is the default branch, based on `kogeki/main`.
+- CI workflow runs on push/PR to `custom` (Node.js + Bun).
+- Release workflow responds to `v*-custom.*` tags, builds the management
+  bundle (`management-bundle.tar.gz` + `management.html`), and publishes to
+  GitHub Releases.
+
+CLIProxyAPI's `internal/managementasset/updater.go` downloads the latest
+release assets from `MrLinda/Cli-Proxy-API-Management-Center`. The
+repository owner (`latestReleaseOwner`) is hardcoded to `MrLinda` in
+`internal/api/handlers/management/config_basic.go`.
+
+Both repositories should be versioned in tandem: a `v*-custom.*` tag on
+CLIProxyAPI should be accompanied by a matching release of the Management
+Center to ensure panel compatibility.
 
 The user may use the shorthand requests defined in this section. Interpret
 them according to the exact workflows below instead of asking the user to
