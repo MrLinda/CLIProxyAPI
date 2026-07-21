@@ -202,6 +202,8 @@ Rules:
 - Stop on any new test failure relative to the baseline.
 - Packages directly modified by the current changes must pass targeted tests.
 - Do not push `custom` when build fails or new regressions appear.
+- Do not push unreviewed code changes without running the local build and
+  targeted tests first.
 - Known platform-dependent baseline failures must be verified against the
   unmodified baseline before being accepted (see Test baseline policy above).
 
