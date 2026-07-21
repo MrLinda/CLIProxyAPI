@@ -150,10 +150,12 @@ type releaseAsset struct {
 }
 
 type releaseResponse struct {
-	Assets []releaseAsset `json:"assets"`
+	TagName string         `json:"tag_name"`
+	Assets  []releaseAsset `json:"assets"`
 }
 
 type releaseAssets struct {
+	tag string
 	bundle         *releaseAsset
 	bundleHash     string
 	standalone     *releaseAsset
@@ -211,6 +213,70 @@ func FilePathFor(configFilePath string, name string) string {
 		return ""
 	}
 	return filepath.Join(dir, name)
+}
+
+// PanelUpdateInfo describes the result of a panel update check.
+type PanelUpdateInfo struct {
+	UpdateAvailable bool   `json:"updateAvailable"`
+	LatestVersion   string `json:"latestVersion"`
+	CurrentHash     string `json:"currentHash"`
+	LatestHash      string `json:"latestHash"`
+	Error           string `json:"error,omitempty"`
+}
+
+// CheckPanelUpdate fetches the latest release info and compares it with the local panel state
+// to determine whether an update is available. It does not download or install anything.
+func CheckPanelUpdate(ctx context.Context, staticDir string, proxyURL string, panelRepository string) *PanelUpdateInfo {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+
+	info := &PanelUpdateInfo{}
+
+	staticDir = strings.TrimSpace(staticDir)
+	if staticDir == "" {
+		info.Error = "static directory unavailable"
+		return info
+	}
+
+	localPath := filepath.Join(staticDir, managementAssetName)
+	_, errStat := os.Stat(localPath)
+	if errStat == nil {
+		if hash, err := fileSHA256(localPath); err == nil {
+			info.CurrentHash = hash
+		}
+	} else if !errors.Is(errStat, os.ErrNotExist) {
+		info.Error = fmt.Sprintf("failed to stat local panel: %v", errStat)
+		return info
+	}
+
+	releaseURL := resolveReleaseURL(panelRepository)
+	client := newHTTPClient(proxyURL)
+
+	assets, err := fetchLatestAssets(ctx, client, releaseURL)
+	if err != nil {
+		info.Error = fmt.Sprintf("fetch release: %v", err)
+		return info
+	}
+
+	info.LatestVersion = assets.tag
+
+	if assets.bundleHash != "" {
+		info.LatestHash = assets.bundleHash
+	} else if assets.standaloneHash != "" {
+		info.LatestHash = assets.standaloneHash
+	}
+
+	if info.LatestHash != "" && info.CurrentHash != "" && strings.EqualFold(info.LatestHash, info.CurrentHash) {
+		info.UpdateAvailable = false
+	} else if info.CurrentHash == "" {
+		// No local file — an update would install the panel for the first time.
+		info.UpdateAvailable = info.LatestHash != ""
+	} else {
+		info.UpdateAvailable = true
+	}
+
+	return info
 }
 
 // EnsureLatestManagementHTML checks the latest management.html asset and updates the local copy when needed.
@@ -742,6 +808,7 @@ func fetchLatestAssets(ctx context.Context, client *http.Client, releaseURL stri
 			assets.standaloneHash = parseDigest(asset.Digest)
 		}
 	}
+	assets.tag = strings.TrimSpace(release.TagName)
 	if assets.bundle == nil && assets.standalone == nil {
 		return nil, fmt.Errorf("management assets %s and %s not found in latest release", managementBundleAssetName, managementAssetName)
 	}

@@ -864,6 +864,8 @@ func (s *Server) registerManagementRoutes() {
 		mgmt.GET("/config.yaml", s.mgmt.GetConfigYAML)
 		mgmt.PUT("/config.yaml", s.mgmt.PutConfigYAML)
 		mgmt.GET("/latest-version", s.mgmt.GetLatestVersion)
+		mgmt.POST("/panel-check", s.mgmt.PostPanelCheck)
+		mgmt.POST("/panel-update", s.mgmt.PostPanelUpdate)
 		mgmt.GET("/plugins", s.mgmt.ListPlugins)
 		mgmt.GET("/plugin-store", s.mgmt.ListPluginStore)
 		mgmt.POST("/plugin-store/:id/install", s.mgmt.InstallPluginFromStore)

@@ -14,6 +14,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/config"
+	"github.com/router-for-me/CLIProxyAPI/v7/internal/managementasset"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/util"
 	sdkconfig "github.com/router-for-me/CLIProxyAPI/v7/sdk/config"
 	log "github.com/sirupsen/logrus"
@@ -171,6 +172,56 @@ func (h *Handler) GetLatestVersion(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{"latest-version": version})
+}
+
+// PostPanelCheck checks whether a newer management panel version is available without downloading it.
+func (h *Handler) PostPanelCheck(c *gin.Context) {
+	proxyURL := ""
+	panelRepo := ""
+	if h != nil && h.cfg != nil {
+		proxyURL = strings.TrimSpace(h.cfg.ProxyURL)
+		panelRepo = h.cfg.RemoteManagement.PanelGitHubRepository
+	}
+
+	staticDir := managementasset.StaticDir(h.configFilePath)
+	if staticDir == "" {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "static_dir_unavailable"})
+		return
+	}
+
+	info := managementasset.CheckPanelUpdate(c.Request.Context(), staticDir, proxyURL, panelRepo)
+	if info.Error != "" {
+		c.JSON(http.StatusBadGateway, gin.H{"error": "check_failed", "message": info.Error})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"updateAvailable": info.UpdateAvailable,
+		"latestVersion":   info.LatestVersion,
+	})
+}
+
+// PostPanelUpdate manually triggers a management panel update.
+func (h *Handler) PostPanelUpdate(c *gin.Context) {
+	proxyURL := ""
+	panelRepo := ""
+	if h != nil && h.cfg != nil {
+		proxyURL = strings.TrimSpace(h.cfg.ProxyURL)
+		panelRepo = h.cfg.RemoteManagement.PanelGitHubRepository
+	}
+
+	staticDir := managementasset.StaticDir(h.configFilePath)
+	if staticDir == "" {
+		c.JSON(http.StatusInternalServerError, gin.H{"status": "failed", "message": "Static directory unavailable"})
+		return
+	}
+
+	success := managementasset.EnsureLatestManagementHTML(c.Request.Context(), staticDir, proxyURL, panelRepo)
+	if success {
+		c.JSON(http.StatusOK, gin.H{"status": "ok"})
+	} else {
+		c.JSON(http.StatusOK, gin.H{"status": "failed", "message": "Unable to synchronize management panel"})
+	}
 }
 
 func WriteConfig(path string, data []byte) error {
