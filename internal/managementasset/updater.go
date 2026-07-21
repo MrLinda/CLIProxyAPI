@@ -37,6 +37,7 @@ const (
 	managementBundleAssetName    = "management-bundle.tar.gz"
 	managementAssetsDirName      = "management-assets"
 	managementBundleHashName     = ".management-bundle.sha256"
+	managementBundleVersionName  = ".management-version"
 	httpUserAgent                = "CLIProxyAPI-management-updater"
 	managementSyncMinInterval    = 30 * time.Second
 	updateCheckInterval          = 3 * time.Hour
@@ -219,13 +220,12 @@ func FilePathFor(configFilePath string, name string) string {
 type PanelUpdateInfo struct {
 	UpdateAvailable bool   `json:"updateAvailable"`
 	LatestVersion   string `json:"latestVersion"`
-	CurrentHash     string `json:"currentHash"`
-	LatestHash      string `json:"latestHash"`
 	Error           string `json:"error,omitempty"`
 }
 
-// CheckPanelUpdate fetches the latest release info and compares it with the local panel state
-// to determine whether an update is available. It does not download or install anything.
+// CheckPanelUpdate fetches the latest release info and compares the version tag
+// with the locally installed version to determine whether an update is available.
+// It does not download or install anything.
 func CheckPanelUpdate(ctx context.Context, staticDir string, proxyURL string, panelRepository string) *PanelUpdateInfo {
 	if ctx == nil {
 		ctx = context.Background()
@@ -236,17 +236,6 @@ func CheckPanelUpdate(ctx context.Context, staticDir string, proxyURL string, pa
 	staticDir = strings.TrimSpace(staticDir)
 	if staticDir == "" {
 		info.Error = "static directory unavailable"
-		return info
-	}
-
-	localPath := filepath.Join(staticDir, managementAssetName)
-	_, errStat := os.Stat(localPath)
-	if errStat == nil {
-		if hash, err := fileSHA256(localPath); err == nil {
-			info.CurrentHash = hash
-		}
-	} else if !errors.Is(errStat, os.ErrNotExist) {
-		info.Error = fmt.Sprintf("failed to stat local panel: %v", errStat)
 		return info
 	}
 
@@ -261,21 +250,13 @@ func CheckPanelUpdate(ctx context.Context, staticDir string, proxyURL string, pa
 
 	info.LatestVersion = assets.tag
 
-	if assets.bundleHash != "" {
-		info.LatestHash = assets.bundleHash
-	} else if assets.standaloneHash != "" {
-		info.LatestHash = assets.standaloneHash
-	}
-
-	if info.LatestHash != "" && info.CurrentHash != "" && strings.EqualFold(info.LatestHash, info.CurrentHash) {
+	localVersion := readVersionMarker(filepath.Join(staticDir, managementBundleVersionName))
+	if localVersion != "" && info.LatestVersion != "" && strings.EqualFold(localVersion, info.LatestVersion) {
 		info.UpdateAvailable = false
-	} else if info.CurrentHash == "" {
-		// No local file — an update would install the panel for the first time.
-		info.UpdateAvailable = info.LatestHash != ""
-	} else {
-		info.UpdateAvailable = true
+		return info
 	}
 
+	info.UpdateAvailable = info.LatestVersion != ""
 	return info
 }
 
@@ -330,7 +311,7 @@ func EnsureLatestManagementHTML(ctx context.Context, staticDir string, proxyURL 
 		if err != nil {
 			if localFileMissing {
 				log.WithError(err).Warn("failed to fetch latest management release information, trying fallback page")
-				if ensureFallbackManagementHTML(ctx, client, localPath) {
+				if ensureFallbackManagementHTML(ctx, client, localPath, "") {
 					return nil, nil
 				}
 				return nil, nil
@@ -340,7 +321,7 @@ func EnsureLatestManagementHTML(ctx context.Context, staticDir string, proxyURL 
 		}
 
 		if assets.bundle != nil {
-			if err = syncManagementBundle(ctx, client, staticDir, assets.bundle, assets.bundleHash); err == nil {
+			if err = syncManagementBundle(ctx, client, staticDir, assets.bundle, assets.bundleHash, assets.tag); err == nil {
 				return nil, nil
 			}
 			log.WithError(err).Warn("failed to update management bundle, trying standalone control panel")
@@ -348,7 +329,7 @@ func EnsureLatestManagementHTML(ctx context.Context, staticDir string, proxyURL 
 		}
 
 		if assets.standalone != nil {
-			if err = syncStandaloneManagementHTML(ctx, client, localPath, assets.standalone, assets.standaloneHash); err == nil {
+			if err = syncStandaloneManagementHTML(ctx, client, localPath, assets.standalone, assets.standaloneHash, assets.tag); err == nil {
 				return nil, nil
 			}
 			log.WithError(err).Warn("failed to update standalone management control panel")
@@ -356,7 +337,7 @@ func EnsureLatestManagementHTML(ctx context.Context, staticDir string, proxyURL 
 
 		if localFileMissing {
 			log.Warn("latest management release did not yield a usable control panel, trying fallback page")
-			_ = ensureFallbackManagementHTML(ctx, client, localPath)
+			_ = ensureFallbackManagementHTML(ctx, client, localPath, assets.tag)
 		}
 		return nil, nil
 	})
@@ -365,7 +346,7 @@ func EnsureLatestManagementHTML(ctx context.Context, staticDir string, proxyURL 
 	return err == nil
 }
 
-func syncManagementBundle(ctx context.Context, client *http.Client, staticDir string, asset *releaseAsset, remoteHash string) error {
+func syncManagementBundle(ctx context.Context, client *http.Client, staticDir string, asset *releaseAsset, remoteHash string, versionTag string) error {
 	hashPath := filepath.Join(staticDir, managementBundleHashName)
 	localHash := readHashMarker(hashPath)
 	if remoteHash != "" && localHash != "" && strings.EqualFold(remoteHash, localHash) {
@@ -395,6 +376,10 @@ func syncManagementBundle(ctx context.Context, client *http.Client, staticDir st
 	if err = atomicWriteFile(hashPath, []byte(downloadedHash+"\n")); err != nil {
 		return fmt.Errorf("write management bundle hash: %w", err)
 	}
+	if versionTag != "" {
+		versionPath := filepath.Join(staticDir, managementBundleVersionName)
+		_ = atomicWriteFile(versionPath, []byte(strings.TrimSpace(versionTag)+"\n"))
+	}
 
 	log.Infof("management bundle updated successfully (hash=%s)", downloadedHash)
 	return nil
@@ -405,7 +390,7 @@ func managementBundleInstalled(staticDir string) bool {
 	return err == nil && info.Mode().IsRegular() && directoryHasRegularFile(filepath.Join(staticDir, managementAssetsDirName))
 }
 
-func syncStandaloneManagementHTML(ctx context.Context, client *http.Client, localPath string, asset *releaseAsset, remoteHash string) error {
+func syncStandaloneManagementHTML(ctx context.Context, client *http.Client, localPath string, asset *releaseAsset, remoteHash string, versionTag string) error {
 	localHash, err := fileSHA256(localPath)
 	if err != nil {
 		if !errors.Is(err, os.ErrNotExist) {
@@ -429,6 +414,10 @@ func syncStandaloneManagementHTML(ctx context.Context, client *http.Client, loca
 		return fmt.Errorf("write management asset: %w", err)
 	}
 	_ = os.Remove(filepath.Join(filepath.Dir(localPath), managementBundleHashName))
+	if versionTag != "" {
+		versionPath := filepath.Join(filepath.Dir(localPath), managementBundleVersionName)
+		_ = atomicWriteFile(versionPath, []byte(strings.TrimSpace(versionTag)+"\n"))
+	}
 
 	log.Infof("standalone management asset updated successfully (hash=%s)", downloadedHash)
 	return nil
@@ -442,7 +431,15 @@ func readHashMarker(path string) string {
 	return strings.ToLower(strings.TrimSpace(string(data)))
 }
 
-func ensureFallbackManagementHTML(ctx context.Context, client *http.Client, localPath string) bool {
+func readVersionMarker(path string) string {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(data))
+}
+
+func ensureFallbackManagementHTML(ctx context.Context, client *http.Client, localPath string, versionTag string) bool {
 	data, downloadedHash, err := downloadAsset(ctx, client, defaultManagementFallbackURL)
 	if err != nil {
 		log.WithError(err).Warn("failed to download fallback management control panel page")
@@ -457,6 +454,10 @@ func ensureFallbackManagementHTML(ctx context.Context, client *http.Client, loca
 		return false
 	}
 	_ = os.Remove(filepath.Join(filepath.Dir(localPath), managementBundleHashName))
+	if versionTag != "" {
+		versionPath := filepath.Join(filepath.Dir(localPath), managementBundleVersionName)
+		_ = atomicWriteFile(versionPath, []byte(strings.TrimSpace(versionTag)+"\n"))
+	}
 
 	log.Infof("management asset updated from fallback page successfully (hash=%s)", downloadedHash)
 	return true
