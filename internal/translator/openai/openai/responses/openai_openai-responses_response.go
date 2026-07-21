@@ -59,7 +59,7 @@ type oaiToResponsesState struct {
 	TotalTokens      int64
 	ReasoningTokens  int64
 	UsageSeen        bool
-	ThinkTagStream   thinkTagStreamState
+	ThinkTagStream   ThinkTagStreamState
 }
 
 // responseIDCounter provides a process-wide unique counter for synthesized response identifiers.
@@ -213,97 +213,7 @@ func buildResponsesCompletedEvent(st *oaiToResponsesState, requestRawJSON []byte
 	return emitRespEvent("response.completed", completed)
 }
 
-const (
-	thinkOpenTag  = "<think>"
-	thinkCloseTag = "</think>"
-)
 
-// extractThinkContent parses <think>...</think> tags from content and separates
-// reasoning from message text. Returns (reasoning, message, hasThink).
-// Supports multiple think blocks; unclosed tags are treated as reasoning.
-func extractThinkContent(content string) (reasoning string, message string, hasThink bool) {
-	var reasoningBuf, messageBuf strings.Builder
-	s := content
-	for {
-		openIdx := strings.Index(s, thinkOpenTag)
-		if openIdx < 0 {
-			messageBuf.WriteString(s)
-			break
-		}
-		messageBuf.WriteString(s[:openIdx])
-		afterOpen := s[openIdx+len(thinkOpenTag):]
-		closeIdx := strings.Index(afterOpen, thinkCloseTag)
-		if closeIdx < 0 {
-			reasoningBuf.WriteString(afterOpen)
-			hasThink = true
-			break
-		}
-		reasoningBuf.WriteString(afterOpen[:closeIdx])
-		s = afterOpen[closeIdx+len(thinkCloseTag):]
-		hasThink = true
-	}
-	return reasoningBuf.String(), messageBuf.String(), hasThink
-}
-
-// thinkTagStreamState tracks the parsing state for streaming content with <think> tags.
-// InThink indicates whether we're currently inside a think block.
-// Pending holds partial tag content that might span chunk boundaries.
-type thinkTagStreamState struct {
-	InThink bool
-	Pending string
-}
-
-// processThinkTagStream processes a streaming chunk and separates reasoning from message deltas.
-// Handles tags that span multiple chunks by buffering partial tags in state.Pending.
-// Returns (reasoningDelta, messageDelta) for the current chunk.
-func processThinkTagStream(st *thinkTagStreamState, chunk string) (reasoningDelta, messageDelta string) {
-	s := st.Pending + chunk
-	st.Pending = ""
-	for {
-		if !st.InThink {
-			idx := strings.Index(s, thinkOpenTag)
-			if idx >= 0 {
-				messageDelta += s[:idx]
-				s = s[idx+len(thinkOpenTag):]
-				st.InThink = true
-				continue
-			}
-			partialLen := 0
-			for i := 1; i < len(thinkOpenTag) && i <= len(s); i++ {
-				if strings.HasPrefix(thinkOpenTag, s[len(s)-i:]) {
-					partialLen = i
-				}
-			}
-			if partialLen > 0 {
-				messageDelta += s[:len(s)-partialLen]
-				st.Pending = s[len(s)-partialLen:]
-			} else {
-				messageDelta += s
-			}
-			return
-		}
-		idx := strings.Index(s, thinkCloseTag)
-		if idx >= 0 {
-			reasoningDelta += s[:idx]
-			s = s[idx+len(thinkCloseTag):]
-			st.InThink = false
-			continue
-		}
-		partialLen := 0
-		for i := 1; i < len(thinkCloseTag) && i <= len(s); i++ {
-			if strings.HasPrefix(thinkCloseTag, s[len(s)-i:]) {
-				partialLen = i
-			}
-		}
-		if partialLen > 0 {
-			reasoningDelta += s[:len(s)-partialLen]
-			st.Pending = s[len(s)-partialLen:]
-		} else {
-			reasoningDelta += s
-		}
-		return
-	}
-}
 
 // ConvertOpenAIChatCompletionsResponseToOpenAIResponses converts OpenAI Chat Completions streaming chunks
 // to OpenAI Responses SSE events (response.*).
@@ -485,7 +395,7 @@ func ConvertOpenAIChatCompletionsResponseToOpenAIResponses(ctx context.Context, 
 		st.UsageSeen = false
 		st.CompletionPending = false
 		st.CompletedEmitted = false
-		st.ThinkTagStream = thinkTagStreamState{}
+		st.ThinkTagStream = ThinkTagStreamState{}
 		// response.created
 		created := []byte(`{"type":"response.created","sequence_number":0,"response":{"id":"","object":"response","created_at":0,"status":"in_progress","background":false,"error":null,"output":[]}}`)
 		created, _ = sjson.SetBytes(created, "sequence_number", nextSeq())
@@ -536,8 +446,8 @@ func ConvertOpenAIChatCompletionsResponseToOpenAIResponses(ctx context.Context, 
 					contentStr := c.String()
 					var reasoningDelta, messageDelta string
 
-					if shouldParseThinkTags() {
-						reasoningDelta, messageDelta = processThinkTagStream(&st.ThinkTagStream, contentStr)
+					if ShouldParseThinkTags() {
+						reasoningDelta, messageDelta = ProcessThinkTagStream(&st.ThinkTagStream, contentStr)
 					} else {
 						// When think tag parsing is disabled, treat all content as message
 						messageDelta = contentStr
@@ -933,8 +843,8 @@ func ConvertOpenAIChatCompletionsResponseToOpenAIResponsesNonStream(_ context.Co
 	contentText := gjson.GetBytes(rawJSON, "choices.0.message.content").String()
 	var thinkReasoning string
 	var hasThinkTag bool
-	if shouldParseThinkTags() {
-		thinkReasoning, _, hasThinkTag = extractThinkContent(contentText)
+	if ShouldParseThinkTags() {
+		thinkReasoning, _, hasThinkTag = ExtractThinkContent(contentText)
 	}
 	includeReasoning := rcText != ""
 	if !includeReasoning && hasThinkTag && thinkReasoning != "" {
@@ -967,9 +877,9 @@ func ConvertOpenAIChatCompletionsResponseToOpenAIResponsesNonStream(_ context.Co
 				if c := msg.Get("content"); c.Exists() && c.String() != "" {
 					contentStr := c.String()
 					// Check if content has <think> tags that need to be split (if enabled)
-					if shouldParseThinkTags() {
-						if _, _, hasThink := extractThinkContent(contentStr); hasThink {
-							_, messagePart, _ := extractThinkContent(contentStr)
+					if ShouldParseThinkTags() {
+						if _, _, hasThink := ExtractThinkContent(contentStr); hasThink {
+							_, messagePart, _ := ExtractThinkContent(contentStr)
 							if messagePart != "" {
 								item := []byte(`{"id":"","type":"message","status":"completed","content":[{"type":"output_text","annotations":[],"logprobs":[],"text":""}],"role":"assistant"}`)
 								item, _ = sjson.SetBytes(item, "id", fmt.Sprintf("msg_%s_%d", id, int(choice.Get("index").Int())))

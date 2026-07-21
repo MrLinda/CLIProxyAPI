@@ -35,11 +35,11 @@ func GetThinkTagParsingMode() string {
 	return thinkTagParsingMode
 }
 
-// shouldParseThinkTags returns true if think tag parsing should be applied.
+// ShouldParseThinkTags returns true if think tag parsing should be applied.
 // In "auto" mode, parsing is enabled (tags are only processed when present).
 // In "on" mode, parsing is always enabled.
 // In "off" mode, parsing is disabled.
-func shouldParseThinkTags() bool {
+func ShouldParseThinkTags() bool {
 	mode := GetThinkTagParsingMode()
 	return mode == "auto" || mode == "on"
 }

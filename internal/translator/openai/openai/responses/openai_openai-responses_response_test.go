@@ -1020,6 +1020,27 @@ func TestExtractThinkContent(t *testing.T) {
 			wantM:     "middleend",
 		},
 		{
+			name:      "think tag inside code fence",
+			content:   "```\n<think>code</think>\n```\nreal message",
+			wantThink: false,
+			wantR:     "",
+			wantM:     "```\n<think>code</think>\n```\nreal message",
+		},
+		{
+			name:      "think tag inside inline code",
+			content:   "use `<think>` tag for reasoning",
+			wantThink: false,
+			wantR:     "",
+			wantM:     "use `<think>` tag for reasoning",
+		},
+		{
+			name:      "think tag before and inside code fence",
+			content:   "<think>real</think>```\n<think>fake</think>\n```",
+			wantThink: true,
+			wantR:     "real",
+			wantM:     "```\n<think>fake</think>\n```",
+		},
+		{
 			name:      "empty content",
 			content:   "",
 			wantThink: false,
@@ -1030,7 +1051,7 @@ func TestExtractThinkContent(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			r, m, hasThink := extractThinkContent(tt.content)
+			r, m, hasThink := ExtractThinkContent(tt.content)
 			if hasThink != tt.wantThink {
 				t.Fatalf("hasThink = %v, want %v", hasThink, tt.wantThink)
 			}
@@ -1048,11 +1069,11 @@ func TestProcessThinkTagStream(t *testing.T) {
 	t.Parallel()
 
 	t.Run("simple think then message", func(t *testing.T) {
-		st := &thinkTagStreamState{}
+		st := &ThinkTagStreamState{}
 		chunks := []string{"<think>", "reason", "ing", "</think>", "answer"}
 		var gotR, gotM string
 		for _, c := range chunks {
-			rd, md := processThinkTagStream(st, c)
+			rd, md := ProcessThinkTagStream(st, c)
 			gotR += rd
 			gotM += md
 		}
@@ -1065,11 +1086,11 @@ func TestProcessThinkTagStream(t *testing.T) {
 	})
 
 	t.Run("tag split across chunks", func(t *testing.T) {
-		st := &thinkTagStreamState{}
+		st := &ThinkTagStreamState{}
 		chunks := []string{"<thi", "nk>", "content", "</thi", "nk>", "msg"}
 		var gotR, gotM string
 		for _, c := range chunks {
-			rd, md := processThinkTagStream(st, c)
+			rd, md := ProcessThinkTagStream(st, c)
 			gotR += rd
 			gotM += md
 		}
@@ -1082,8 +1103,8 @@ func TestProcessThinkTagStream(t *testing.T) {
 	})
 
 	t.Run("no think tags", func(t *testing.T) {
-		st := &thinkTagStreamState{}
-		rd, md := processThinkTagStream(st, "plain text")
+		st := &ThinkTagStreamState{}
+		rd, md := ProcessThinkTagStream(st, "plain text")
 		if rd != "" {
 			t.Fatalf("reasoning = %q, want empty", rd)
 		}
@@ -1093,11 +1114,11 @@ func TestProcessThinkTagStream(t *testing.T) {
 	})
 
 	t.Run("text before think tag", func(t *testing.T) {
-		st := &thinkTagStreamState{}
+		st := &ThinkTagStreamState{}
 		chunks := []string{"prefix", "<think>", "reason", "</think>", "suffix"}
 		var gotR, gotM string
 		for _, c := range chunks {
-			rd, md := processThinkTagStream(st, c)
+			rd, md := ProcessThinkTagStream(st, c)
 			gotR += rd
 			gotM += md
 		}
@@ -1245,8 +1266,8 @@ func TestShouldParseThinkTags(t *testing.T) {
 		t.Run(tt.mode, func(t *testing.T) {
 			SetThinkTagParsingMode(tt.mode)
 			defer SetThinkTagParsingMode("auto")
-			if got := shouldParseThinkTags(); got != tt.want {
-				t.Fatalf("shouldParseThinkTags() = %v, want %v for mode %q", got, tt.want, tt.mode)
+			if got := ShouldParseThinkTags(); got != tt.want {
+				t.Fatalf("ShouldParseThinkTags() = %v, want %v for mode %q", got, tt.want, tt.mode)
 			}
 		})
 	}
