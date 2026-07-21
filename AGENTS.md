@@ -392,9 +392,13 @@ After publication, verify all three tags share the same top-level digest.
 
 1. Confirm current branch is `custom` and matches `origin/custom`.
 2. Confirm `custom` branch validate workflow succeeded and publish was skipped.
-3. Confirm the target version tag does not exist locally or on `origin`.
-4. Confirm the tag points to the intended commit.
-5. Create an annotated tag:
+3. Run the local build for the affected project to catch compilation errors
+   before tagging:
+   - CLIProxyAPI: `go build -o test-output ./cmd/server && rm test-output`
+   - Management Center: `bun run build:release`
+4. Confirm the target version tag does not exist locally or on `origin`.
+5. Confirm the tag points to the intended commit.
+6. Create an annotated tag:
    ```bash
    git tag -a <version-tag> <commit-sha> -m "Release <version-tag>"
    git push origin refs/tags/<version-tag>
