@@ -70,7 +70,7 @@ go build -o test-output ./cmd/server && rm test-output # Verify compile (REQUIRE
 - `main` — exact mirror of `upstream/main`. No personal commits.
   Tracking: `upstream/main` (fetch/merge), push remote: `origin`.
   Sync: `git reset --hard upstream/main && git push origin main --force-with-lease`.
-- `custom` — long-lived maintenance branch based on `kogeki/main`, with `upstream/main` merged in periodically.
+- `custom` — default branch on GitHub; long-lived maintenance branch based on `kogeki/main`, with `upstream/main` merged in periodically.
   Holds personal commits via cherry-pick (never rebase this branch).
   Push: `git push origin custom` (no force).
 - `feature/*` — short-lived branches for PRs. Baseline is the PR target's default branch.
@@ -82,6 +82,12 @@ go build -o test-output ./cmd/server && rm test-output # Verify compile (REQUIRE
 - PR to `kogekiplay/CLIProxyAPI:dev` → start from `kogeki/dev`.
 
 Only cherry-pick the required feature commits. Do not move unrelated branch history into a PR.
+
+Because the personal fork's default branch is now `custom`, GitHub may
+auto-select `custom` as the base when creating a PR within the fork. When
+opening a PR to the official upstream or to `kogekiplay`, always explicitly
+set the correct base branch (`upstream/main`, `kogeki/main`, or `kogeki/dev`)
+instead of relying on the auto-selected default.
 
 ## Sync workflow
 
@@ -286,6 +292,24 @@ legitimately reference an earlier commit (`f5f72dc7`) than the current
 
 These SHAs and digests are historical records of the initial custom release.
 Future releases will use different version tags, commits, and digests.
+
+### Default branch and feature branch cleanup
+
+The following changes were applied after the initial release:
+
+- GitHub default branch was changed from `main` to `custom`.
+- `origin/HEAD` updated to point to `origin/custom`.
+- `feat/think-tag-parsing` branch (local and `origin`) was deleted after
+  verifying patch-id equivalence (`7959379bf68089843849ce6359ebe18bc2ad5f61`)
+  between the original commit (`1c54269b`) and its cherry-pick in `custom`
+  (`2a00d9fb`).
+- No open PRs were associated with the deleted branch.
+- The original commit is preserved by the backup tag
+  `backup/feat-think-tag-parsing-pre-reorg` (→ `1c54269b`).
+- Deleting the branch does not remove the functionality; `custom` already
+  contains the equivalent patch.
+
+These are historical records. Future cleanup operations may differ.
 
 ## Mandatory stop conditions
 
