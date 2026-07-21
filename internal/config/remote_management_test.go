@@ -9,7 +9,7 @@ import (
 func TestParseConfigBytesMigratesLegacyDefaultManagementPanelRepository(t *testing.T) {
 	cfg, err := ParseConfigBytes([]byte(`
 remote-management:
-  panel-github-repository: "https://github.com/router-for-me/Cli-Proxy-API-Management-Center"
+  panel-github-repository: "https://github.com/MrLinda/Cli-Proxy-API-Management-Center"
 `))
 	if err != nil {
 		t.Fatalf("ParseConfigBytes() error = %v", err)
@@ -24,7 +24,7 @@ func TestLoadConfigOptionalMigratesLegacyDefaultManagementPanelRepository(t *tes
 	configPath := filepath.Join(t.TempDir(), "config.yaml")
 	if err := os.WriteFile(configPath, []byte(`
 remote-management:
-  panel-github-repository: "https://github.com/router-for-me/Cli-Proxy-API-Management-Center"
+  panel-github-repository: "https://github.com/MrLinda/Cli-Proxy-API-Management-Center"
 `), 0o600); err != nil {
 		t.Fatalf("os.WriteFile() error = %v", err)
 	}

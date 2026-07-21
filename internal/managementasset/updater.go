@@ -31,8 +31,8 @@ import (
 )
 
 const (
-	defaultManagementReleaseURL  = "https://api.github.com/repos/kogekiplay/Cli-Proxy-API-Management-Center/releases/latest"
-	defaultManagementFallbackURL = "https://github.com/kogekiplay/Cli-Proxy-API-Management-Center/releases/latest/download/management.html"
+	defaultManagementReleaseURL  = "https://api.github.com/repos/MrLinda/Cli-Proxy-API-Management-Center/releases/latest"
+	defaultManagementFallbackURL = "https://github.com/MrLinda/Cli-Proxy-API-Management-Center/releases/latest/download/management.html"
 	managementAssetName          = "management.html"
 	managementBundleAssetName    = "management-bundle.tar.gz"
 	managementAssetsDirName      = "management-assets"

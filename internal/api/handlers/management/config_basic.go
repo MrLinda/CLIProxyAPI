@@ -22,7 +22,7 @@ import (
 
 const (
 	latestReleaseAPIBaseURL = "https://api.github.com"
-	latestReleaseOwner      = "kogekiplay"
+	latestReleaseOwner      = "MrLinda"
 	latestReleaseRepo       = "CLIProxyAPI"
 	latestReleaseUserAgent  = "CLIProxyAPI"
 )

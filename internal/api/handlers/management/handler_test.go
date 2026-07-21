@@ -161,7 +161,7 @@ func TestMiddlewareSetsSupportPluginHeader(t *testing.T) {
 
 func TestLatestReleaseAPIURLUsesForkRepository(t *testing.T) {
 	got := latestReleaseAPIURL()
-	want := "https://api.github.com/repos/kogekiplay/CLIProxyAPI/releases/latest"
+	want := "https://api.github.com/repos/MrLinda/CLIProxyAPI/releases/latest"
 	if got != want {
 		t.Fatalf("latest release API URL = %q, want %q", got, want)
 	}
@@ -170,9 +170,9 @@ func TestLatestReleaseAPIURLUsesForkRepository(t *testing.T) {
 func TestLatestVersionFallsBackToForkTagsWhenReleaseIsMissing(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
-		case "/repos/kogekiplay/CLIProxyAPI/releases/latest":
+		case "/repos/MrLinda/CLIProxyAPI/releases/latest":
 			http.Error(w, `{"message":"Not Found"}`, http.StatusNotFound)
-		case "/repos/kogekiplay/CLIProxyAPI/tags":
+		case "/repos/MrLinda/CLIProxyAPI/tags":
 			w.Header().Set("Content-Type", "application/json")
 			_, _ = w.Write([]byte(`[{"name":"v7.2.40-fork"}]`))
 		default:
