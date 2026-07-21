@@ -3,7 +3,7 @@ package chat_completions
 import (
 	"bytes"
 	"context"
-	"strings"
+	"strconv"
 
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/translator/openai/openai/responses"
 	"github.com/tidwall/gjson"
@@ -59,7 +59,7 @@ func ConvertOpenAIResponseToOpenAI(_ context.Context, _ string, originalRequestR
 		}
 
 		modified = true
-		prefix := "choices." + strings.Repeat("0,", int(i.Int()))
+		prefix := "choices." + strconv.Itoa(int(i.Int())) + "."
 
 		if reasoningDelta != "" {
 			existing := gjson.GetBytes(rawJSON, prefix+"delta.reasoning_content").String()
@@ -110,7 +110,7 @@ func ConvertOpenAIResponseToOpenAINonStream(ctx context.Context, modelName strin
 		}
 
 		modified = true
-		prefix := "choices." + strings.Repeat("0,", int(i.Int()))
+		prefix := "choices." + strconv.Itoa(int(i.Int())) + "."
 
 		rawJSON, _ = sjson.SetBytes(rawJSON, prefix+"message.content", message)
 
