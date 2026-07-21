@@ -441,3 +441,162 @@ The existing `.github/workflows/release.yaml` responds to all tags (including
 `v*-custom.*`) and generates GitHub Releases with multi-platform packages.
 This is intentional: the same tag may trigger both `custom-ci-image` (GHCR)
 and `release` (GitHub Release).
+
+## Maintenance shorthand commands
+
+The user may use the shorthand requests defined in this section. Interpret
+them according to the exact workflows below instead of asking the user to
+repeat the full procedure.
+
+### `检查官方和 kogeki 更新`
+
+Interpret this as a read-only synchronization audit of:
+
+- `upstream/main`;
+- `kogeki/main`;
+- `kogeki/dev`, for reference only;
+- the local and remote `main`;
+- the local and remote `custom`.
+
+Before auditing:
+
+```bash
+git switch custom
+git status --short
+git remote -v
+git branch -vv
+git fetch --all --prune --tags
+```
+
+The only normally permitted visible untracked file is:
+
+```text
+?? pr-body.md
+```
+
+`docker-build/` is intentionally ignored and must remain local.
+
+During this audit, do not:
+
+- merge;
+- cherry-pick;
+- rebase;
+- reset;
+- modify files;
+- create branches or tags;
+- commit;
+- push;
+- change repository settings.
+
+The audit must:
+
+1. Verify that `main`, `origin/main`, and `upstream/main` still have the
+   expected relationship.
+2. Compare `upstream/main` with `custom`.
+3. Compare `kogeki/main` with `custom`.
+4. Inspect `kogeki/dev` only for noteworthy unpublished changes.
+5. List commits not yet present in `custom`.
+6. Detect patch-equivalent commits with `git cherry` and
+   `--cherry-pick`.
+7. List affected files and modules.
+8. Check whether upstream and kogeki modify overlapping paths.
+9. Use `git merge-tree --write-tree` when supported to predict conflicts
+   without changing the working tree.
+10. Classify updates as:
+    - official necessary updates;
+    - kogeki necessary updates;
+    - optional updates;
+    - already patch-equivalent;
+    - not recommended.
+11. Recommend a precise synchronization order.
+12. List the required build and targeted tests.
+13. End without making any repository changes.
+
+The report must clearly state:
+
+```text
+Recommended synchronization order:
+1. ...
+2. ...
+```
+
+and then pause.
+
+### `按最新审计建议同步更新`
+
+Interpret this as permission to execute the most recent synchronization plan,
+but only when a sufficiently recent audit exists and the repository refs have
+not changed since that audit.
+
+Before execution:
+
+```bash
+git fetch --all --prune --tags
+git status --short
+```
+
+Revalidate every SHA used by the audit. If `upstream/main`, `kogeki/main`,
+`custom`, or `origin/custom` changed after the audit, stop and run a new audit
+instead of applying a stale plan.
+
+Execution rules:
+
+- Work only on `custom`, except when updating the pure mirror `main`.
+- Update `main` only from `upstream/main`.
+- Use `git push origin main --force-with-lease` only for the mirrored
+  `main`.
+- Never use plain `--force`.
+- Do not rebase the long-lived `custom` branch.
+- Apply the exact merge or cherry-pick order approved by the audit.
+- Do not merge the complete `kogeki/dev` branch unless the audit explicitly
+  recommended it and the user confirmed it.
+- Stop immediately on merge or cherry-pick conflicts.
+- Do not choose `ours`, `theirs`, skip a commit, or alter business logic
+  without explicit approval.
+- Preserve `pr-body.md`, `docker-build/`, backup branches, and backup tags.
+
+After applying code updates, run:
+
+```bash
+go build -o test-output ./cmd/server
+rm -f test-output
+go test -count=1 ./...
+```
+
+Also run every targeted package test identified by the audit.
+
+Known platform-dependent failures may be accepted only under the repository's
+test baseline policy. No new failure is permitted.
+
+Before pushing `custom`, report:
+
+- applied commits and merge commits;
+- patch-equivalence results;
+- build result;
+- full-suite result;
+- targeted-test results;
+- whether any failure differs from the baseline;
+- final `git status --short`.
+
+Push `custom` only after all required validation succeeds.
+
+An ordinary `custom` push performs validation only and does not publish a
+container image. Do not create a release tag unless the user separately asks
+for a new release version.
+
+### `发布下一个 custom 版本`
+
+This shorthand is not sufficient by itself to choose a version number.
+
+When the user says this, first report:
+
+- the latest existing `v*-custom.*` tag;
+- the current official base version;
+- the proposed next custom version;
+- the exact commit that would be tagged.
+
+Do not create or push the tag until the user explicitly confirms the proposed
+version.
+
+Existing release tags are immutable. Never move, delete, overwrite, or reuse
+a published version tag.
