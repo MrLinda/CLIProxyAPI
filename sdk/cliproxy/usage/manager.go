@@ -13,21 +13,10 @@ import (
 // DefaultServiceTier is retained for direct SDK and non-OpenAI usage callers.
 const DefaultServiceTier = "default"
 
-const pluginDispatchTimeout = 30 * time.Second
-
 // AutoServiceTier is the OpenAI request semantics when service_tier is omitted.
 // OpenAI HTTP handlers set it explicitly, without changing other providers'
 // historical direct-SDK default.
 const AutoServiceTier = "auto"
-
-// CacheInputMode describes whether fine-grained cache tokens are already
-// included in InputTokens. The zero value remains unknown for older callers.
-type CacheInputMode string
-
-const (
-	CacheInputModeIncluded CacheInputMode = "included_in_input"
-	CacheInputModeSeparate CacheInputMode = "separate_from_input"
-)
 
 // Record contains the usage statistics captured for a single provider request.
 type Record struct {
@@ -36,12 +25,11 @@ type Record struct {
 	ExecutorType string
 	Model        string
 	Alias        string
-	// APIKey stores the client key used to call CPA, when available.
-	APIKey string
-	// CredentialKeyHash stores the non-reversible hash of the upstream API key credential.
-	CredentialKeyHash string
-	AuthID            string
-	AuthIndex         string
+	APIKey       string
+	AuthID       string
+	AuthIndex    string
+	// AccessTokenSHA256 identifies the OAuth token version without exposing the token.
+	AccessTokenSHA256 string
 	AuthType          string
 	Source            string
 	// ReasoningEffort stores the translated upstream thinking level for request event logs.
@@ -81,8 +69,8 @@ type Detail struct {
 	CachedTokens        int64
 	CacheReadTokens     int64
 	CacheCreationTokens int64
-	CacheInputMode      CacheInputMode
 	TotalTokens         int64
+	TokenBreakdown      TokenBreakdown
 	ResponseServiceTier string
 }
 
@@ -237,11 +225,10 @@ type Manager struct {
 	stopOnce sync.Once
 	cancel   context.CancelFunc
 
-	mu        sync.Mutex
-	cond      *sync.Cond
-	queue     []queueItem
-	queueHead int
-	closed    bool
+	mu     sync.Mutex
+	cond   *sync.Cond
+	queue  []queueItem
+	closed bool
 
 	pluginsMu sync.RWMutex
 	plugins   []Plugin
@@ -250,10 +237,7 @@ type Manager struct {
 
 // NewManager constructs a manager with a buffered queue.
 func NewManager(buffer int) *Manager {
-	if buffer < 0 {
-		buffer = 0
-	}
-	m := &Manager{queue: make([]queueItem, 0, buffer)}
+	m := &Manager{}
 	m.cond = sync.NewCond(&m.mu)
 	return m
 }
@@ -336,12 +320,6 @@ func (m *Manager) Publish(ctx context.Context, record Record) {
 		m.mu.Unlock()
 		return
 	}
-	if m.queueHead > 0 && len(m.queue) == cap(m.queue) {
-		remaining := copy(m.queue, m.queue[m.queueHead:])
-		clear(m.queue[remaining:])
-		m.queue = m.queue[:remaining]
-		m.queueHead = 0
-	}
 	m.queue = append(m.queue, queueItem{ctx: ctx, record: record})
 	m.mu.Unlock()
 	m.cond.Signal()
@@ -357,13 +335,8 @@ func (m *Manager) run(ctx context.Context) {
 			m.mu.Unlock()
 			return
 		}
-		item := m.queue[m.queueHead]
-		m.queue[m.queueHead] = queueItem{}
-		m.queueHead++
-		if m.queueHead == len(m.queue) {
-			m.queue = m.queue[:0]
-			m.queueHead = 0
-		}
+		item := m.queue[0]
+		m.queue = m.queue[1:]
 		m.mu.Unlock()
 		m.dispatch(item)
 	}
@@ -391,11 +364,6 @@ func safeInvoke(plugin Plugin, ctx context.Context, record Record) {
 			log.Errorf("usage: plugin panic recovered: %v", r)
 		}
 	}()
-	if ctx == nil {
-		ctx = context.Background()
-	}
-	ctx, cancel := context.WithTimeout(ctx, pluginDispatchTimeout)
-	defer cancel()
 	plugin.HandleUsage(ctx, record)
 }
 

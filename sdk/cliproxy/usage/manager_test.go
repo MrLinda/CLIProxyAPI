@@ -3,71 +3,7 @@ package usage
 import (
 	"context"
 	"testing"
-	"time"
 )
-
-type usageContextTestKey struct{}
-
-type usageContextCapturePlugin struct {
-	ctxs chan context.Context
-}
-
-func (p *usageContextCapturePlugin) HandleUsage(ctx context.Context, record Record) {
-	p.ctxs <- ctx
-}
-
-func TestManagerAddsBoundedDeadlineToPluginContext(t *testing.T) {
-	manager := NewManager(1)
-	defer manager.Stop()
-
-	plugin := &usageContextCapturePlugin{ctxs: make(chan context.Context, 1)}
-	manager.Register(plugin)
-
-	ctx := context.WithValue(context.Background(), usageContextTestKey{}, "request-id")
-	manager.Publish(ctx, Record{Model: "gpt-test"})
-
-	var got context.Context
-	select {
-	case got = <-plugin.ctxs:
-	case <-time.After(time.Second):
-		t.Fatal("timed out waiting for usage plugin context")
-	}
-
-	if _, ok := got.Deadline(); !ok {
-		t.Fatal("plugin context has no deadline")
-	}
-	if value := got.Value(usageContextTestKey{}); value != "request-id" {
-		t.Fatalf("plugin context value = %v, want request-id", value)
-	}
-}
-
-func TestManagerReusesConfiguredQueueBuffer(t *testing.T) {
-	manager := NewManager(4)
-	defer manager.Stop()
-	if got := cap(manager.queue); got != 4 {
-		t.Fatalf("initial queue capacity = %d, want 4", got)
-	}
-
-	plugin := &usageContextCapturePlugin{ctxs: make(chan context.Context, 1)}
-	manager.Register(plugin)
-	for i := 0; i < 12; i++ {
-		manager.Publish(context.Background(), Record{Model: "gpt-test"})
-		select {
-		case <-plugin.ctxs:
-		case <-time.After(time.Second):
-			t.Fatal("timed out waiting for usage plugin context")
-		}
-	}
-
-	manager.mu.Lock()
-	defer manager.mu.Unlock()
-	if len(manager.queue) != 0 || manager.queueHead != 0 {
-		t.Fatalf("drained queue state = len %d head %d", len(manager.queue), manager.queueHead)
-	}
-	if got := cap(manager.queue); got < 4 {
-		t.Fatalf("drained queue capacity = %d, want at least 4", got)
-	}
-}
 
 func TestGenerateEnabledDefaultsNilToTrue(t *testing.T) {
 	if !GenerateEnabled(nil) {
@@ -101,8 +37,8 @@ func TestGenerateFromContextHonorsExplicitFalse(t *testing.T) {
 }
 
 func TestRecordOmittedGenerateIsEnabled(t *testing.T) {
-	// Existing callers construct Record without setting Generate. Omission must
-	// remain distinguishable from explicit false and default to true.
+	// Existing callers construct Record without setting Generate.
+	// Omission must remain distinguishable from explicit false and default to true.
 	record := Record{
 		Provider: "openai",
 		Model:    "gpt-5.4",

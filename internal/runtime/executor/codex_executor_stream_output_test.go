@@ -18,6 +18,43 @@ import (
 	"github.com/tidwall/gjson"
 )
 
+func TestCodexExecutorExecute_NonEmptyCompletionOutputHydratesMissingItemID(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte(`data: {"type":"response.output_item.done","item":{"id":"fc_123","type":"function_call","call_id":"call_123","name":"weather","arguments":"{}"},"output_index":0}` + "\n\n"))
+		_, _ = w.Write([]byte(`data: {"type":"response.output_item.done","item":{"id":"fc_done_existing","type":"function_call","call_id":"call_existing","name":"other","arguments":"{}"},"output_index":1}` + "\n\n"))
+		_, _ = w.Write([]byte(`data: {"type":"response.completed","response":{"id":"resp_1","object":"response","status":"completed","output":[{"id":null,"type":"function_call","call_id":"call_123","name":"weather-terminal","arguments":"{}"},{"id":"fc_existing","type":"function_call","call_id":"call_existing","name":"preserved","arguments":"{}"}]}}` + "\n\n"))
+	}))
+	defer server.Close()
+
+	executor := NewCodexExecutor(&config.Config{})
+	auth := &cliproxyauth.Auth{Attributes: map[string]string{
+		"base_url": server.URL,
+		"api_key":  "test",
+	}}
+
+	resp, err := executor.Execute(context.Background(), auth, cliproxyexecutor.Request{
+		Model:   "gpt-5.4",
+		Payload: []byte(`{"model":"gpt-5.4","input":"What is the weather?"}`),
+	}, cliproxyexecutor.Options{
+		SourceFormat: sdktranslator.FromString("openai-response"),
+		Stream:       false,
+	})
+	if err != nil {
+		t.Fatalf("Execute error: %v", err)
+	}
+
+	if got := gjson.GetBytes(resp.Payload, "output.0.id").String(); got != "fc_123" {
+		t.Fatalf("output[0].id = %q, want %q; payload=%s", got, "fc_123", resp.Payload)
+	}
+	if got := gjson.GetBytes(resp.Payload, "output.0.name").String(); got != "weather-terminal" {
+		t.Fatalf("output[0].name = %q, want terminal value; payload=%s", got, resp.Payload)
+	}
+	if got := gjson.GetBytes(resp.Payload, "output.1.id").String(); got != "fc_existing" {
+		t.Fatalf("output[1].id = %q, want existing value; payload=%s", got, resp.Payload)
+	}
+}
+
 func TestCodexExecutorExecute_EmptyStreamCompletionOutputUsesOutputItemDone(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/event-stream")
@@ -419,54 +456,6 @@ func TestCodexExecutorExecuteStreamSurfacesTerminalStreamError(t *testing.T) {
 	assertCodexErrorCode(t, streamErr.Error(), "invalid_request_error", "context_too_large")
 }
 
-func TestCodexExecutorExecuteStreamSurfacesCyberPolicyError(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "text/event-stream")
-		_, _ = w.Write([]byte(`data: {"type":"error","error":{"type":"invalid_request","code":"cyber_policy","message":"This content was flagged for possible cybersecurity risk.","param":null},"sequence_number":3}` + "\n\n"))
-	}))
-	defer server.Close()
-
-	executor := NewCodexExecutor(&config.Config{})
-	auth := &cliproxyauth.Auth{Attributes: map[string]string{
-		"base_url": server.URL,
-		"api_key":  "test",
-	}}
-
-	result, err := executor.ExecuteStream(context.Background(), auth, cliproxyexecutor.Request{
-		Model:   "gpt-5.6-sol",
-		Payload: []byte(`{"model":"gpt-5.6-sol","input":"hello"}`),
-	}, cliproxyexecutor.Options{
-		SourceFormat: sdktranslator.FromString("openai-response"),
-		Stream:       true,
-	})
-	if err != nil {
-		t.Fatalf("ExecuteStream error: %v", err)
-	}
-
-	var streamErr error
-	for chunk := range result.Chunks {
-		if chunk.Err != nil {
-			streamErr = chunk.Err
-			break
-		}
-	}
-	if streamErr == nil {
-		t.Fatal("missing cyber policy stream error")
-	}
-	if got := statusCodeFromTestError(t, streamErr); got != http.StatusBadRequest {
-		t.Fatalf("status code = %d, want %d; err=%v", got, http.StatusBadRequest, streamErr)
-	}
-	if got := gjson.Get(streamErr.Error(), "error.type").String(); got != "invalid_request" {
-		t.Fatalf("error type = %q, want invalid_request; err=%v", got, streamErr)
-	}
-	if got := gjson.Get(streamErr.Error(), "error.code").String(); got != "cyber_policy" {
-		t.Fatalf("error code = %q, want cyber_policy; err=%v", got, streamErr)
-	}
-	if got := gjson.Get(streamErr.Error(), "error.message").String(); got != "This content was flagged for possible cybersecurity risk." {
-		t.Fatalf("error message = %q; err=%v", got, streamErr)
-	}
-}
-
 func TestCodexTerminalStreamContextLengthErrFromResponseFailed(t *testing.T) {
 	err, ok := codexTerminalStreamContextLengthErr([]byte(`{"type":"response.failed","response":{"id":"resp_1","status":"failed","error":{"code":"context_length_exceeded","message":"Your input exceeds the context window of this model. Please adjust your input and try again."}}}`))
 	if !ok {
@@ -518,13 +507,8 @@ func TestCodexTerminalFailureErrClassifiesStatus(t *testing.T) {
 			wantStatus: http.StatusBadRequest,
 		},
 		{
-			name:       "cyber policy invalid request",
+			name:       "cyber policy",
 			event:      `{"type":"error","error":{"type":"invalid_request","code":"cyber_policy","message":"This content was flagged for possible cybersecurity risk."}}`,
-			wantStatus: http.StatusBadRequest,
-		},
-		{
-			name:       "content policy code without recognized type",
-			event:      `{"type":"error","error":{"code":"content_policy_violation","message":"The request was rejected by the safety system."}}`,
 			wantStatus: http.StatusBadRequest,
 		},
 		{
